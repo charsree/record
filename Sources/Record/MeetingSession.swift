@@ -563,6 +563,10 @@ final class MeetingSession: ObservableObject {
     func insertChapter(title: String) async {
         let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
+        // Break the paragraph thread so the next speech utterance starts
+        // a new row instead of being merged with the one before the
+        // chapter marker.
+        lastFinalizeAt.removeAll()
         await append(TranscriptSegment(source: .chapter, text: trimmed, isFinal: true))
     }
 
@@ -572,6 +576,7 @@ final class MeetingSession: ObservableObject {
     func insertNote(text: String) async {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
+        lastFinalizeAt.removeAll()
         await append(TranscriptSegment(source: .note, text: trimmed, isFinal: true))
     }
 
@@ -1098,6 +1103,7 @@ final class MeetingSession: ObservableObject {
             accumulatedActiveTime = 0
             isPaused = false
             lastAudioActivityAt = .now
+            lastFinalizeAt.removeAll()
             startRecordingWatchdog()
             playStartStopSoundIfEnabled()
             smokeLog("capture started")
@@ -1314,59 +1320,59 @@ final class MeetingSession: ObservableObject {
         transcript = await store.all()
     }
 
+    /// Maximum silence gap (seconds) between two finalized utterances
+    /// that still counts as "the same paragraph". Tuned to match how
+    /// Apple Voice Memos groups continuous speech into paragraphs —
+    /// short pauses (breath, filler word) stay on the same row; longer
+    /// pauses start a new one. Explicit chapter/note inserts always
+    /// break the paragraph too.
+    private static let paragraphGapSeconds: TimeInterval = 2.5
+    /// If a paragraph grows past this many characters, force a break on
+    /// the next finalize so no row becomes an unreadable wall of text.
+    private static let paragraphMaxCharacters = 700
+    private var lastFinalizeAt: [TranscriptSource: Date] = [:]
+
     private func finalize(source: TranscriptSource, text: String) async {
-        // Split multi-sentence utterances into separate final segments so a
-        // long back-and-forth (e.g. speakerphone bouncing between people
-        // without any real 500 ms gap) ends up as one segment per sentence
-        // instead of a wall of text in a single row.
-        let sentences = Self.splitIntoSentences(text)
-        if sentences.count <= 1 {
-            let finalized = await store.finalizeLive(source: source, text: text)
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            _ = await store.finalizeLive(source: source, text: trimmed)
             transcript = await store.all()
-            if let finalized, let database, let meetingID {
-                try? await database.append(finalized, meetingID: meetingID)
+            return
+        }
+
+        let now = Date()
+        let previousFinalizeAt = lastFinalizeAt[source]
+        lastFinalizeAt[source] = now
+
+        // Should this utterance fold into the previous paragraph?
+        // Yes when: (1) we just finalized recently, and (2) that
+        // paragraph isn't already at the size cap. Otherwise it starts a
+        // new paragraph. Matches Apple Voice Memos' behavior where a
+        // continuous burst of speech reads as one flowing paragraph.
+        let canMerge: Bool
+        if let previous = previousFinalizeAt,
+           now.timeIntervalSince(previous) < Self.paragraphGapSeconds,
+           let last = await store.lastFinal(for: source),
+           last.text.count < Self.paragraphMaxCharacters {
+            canMerge = true
+        } else {
+            canMerge = false
+        }
+
+        if canMerge,
+           let merged = await store.appendToLastFinal(source: source, additionalText: trimmed) {
+            transcript = await store.all()
+            if let database, let meetingID {
+                try? await database.append(merged, meetingID: meetingID)
             }
             return
         }
-        var iterator = sentences.makeIterator()
-        // First sentence closes the current live segment.
-        if let first = iterator.next() {
-            let finalized = await store.finalizeLive(source: source, text: first)
-            if let finalized, let database, let meetingID {
-                try? await database.append(finalized, meetingID: meetingID)
-            }
-        }
-        // Remaining sentences append as their own new final segments.
-        while let sentence = iterator.next() {
-            let segment = TranscriptSegment(source: source, text: sentence, isFinal: true)
-            await store.append(segment)
-            if let database, let meetingID {
-                try? await database.append(segment, meetingID: meetingID)
-            }
-        }
-        transcript = await store.all()
-    }
 
-    /// Rough sentence tokenizer used for splitting finalized utterances.
-    /// Keeps trailing punctuation with the sentence and trims whitespace.
-    private static func splitIntoSentences(_ text: String) -> [String] {
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return [] }
-        var sentences: [String] = []
-        var current = ""
-        for character in trimmed {
-            current.append(character)
-            if character == "." || character == "?" || character == "!" {
-                let piece = current.trimmingCharacters(in: .whitespacesAndNewlines)
-                if !piece.isEmpty { sentences.append(piece) }
-                current = ""
-            }
+        let finalized = await store.finalizeLive(source: source, text: trimmed)
+        transcript = await store.all()
+        if let finalized, let database, let meetingID {
+            try? await database.append(finalized, meetingID: meetingID)
         }
-        let tail = current.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !tail.isEmpty { sentences.append(tail) }
-        // Only worth splitting if every sentence has real content (>2 words).
-        let meaningful = sentences.filter { $0.split(separator: " ").count >= 2 }
-        return meaningful.count >= 2 ? meaningful : [trimmed]
     }
 
     private func append(_ segment: TranscriptSegment) async {

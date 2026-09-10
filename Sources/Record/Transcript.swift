@@ -122,6 +122,44 @@ actor TranscriptStore {
         return segment
     }
 
+    /// Append `additionalText` to the most recent FINAL segment for the
+    /// given source (with a joining space and a period if needed). Used
+    /// by the paragraph-merge logic so consecutive utterances with only
+    /// a brief pause between them share one row — the way Apple Voice
+    /// Memos groups a run of speech into a paragraph.
+    ///
+    /// Returns the updated segment, or nil if there was no prior segment
+    /// to append to (the caller then falls back to creating a fresh one).
+    func appendToLastFinal(source: TranscriptSource, additionalText: String) -> TranscriptSegment? {
+        guard !additionalText.isEmpty else { return nil }
+        // Drop any pending live bubble for this source — the utterance
+        // just wrapped up and we're about to fold it into the last final
+        // segment, so the live row is stale.
+        if let liveIndex = segments.lastIndex(where: { $0.source == source && !$0.isFinal }) {
+            segments.remove(at: liveIndex)
+        }
+        guard let index = segments.lastIndex(where: { $0.source == source && $0.isFinal }) else {
+            return nil
+        }
+        var combined = segments[index].text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let addition = additionalText.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Add sentence-ending punctuation if the previous chunk doesn't
+        // already have terminal punctuation, so paragraphs read cleanly.
+        if let last = combined.last, !",.?!:;\"'”’)]}".contains(last) {
+            combined += "."
+        }
+        combined += " " + addition
+        segments[index].text = combined
+        return segments[index]
+    }
+
+    /// The most recent final segment for a source (or nil if none). Used
+    /// by the paragraph-merge logic to decide whether to append or start
+    /// a new segment based on the gap since the last finalize.
+    func lastFinal(for source: TranscriptSource) -> TranscriptSegment? {
+        segments.last(where: { $0.source == source && $0.isFinal })
+    }
+
     func all() -> [TranscriptSegment] {
         segments
     }
