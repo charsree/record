@@ -1,0 +1,44 @@
+# Xcode / SwiftPM
+.build/
+.swiftpm/
+DerivedData/
+*.xcodeproj
+*.xcworkspace
+Package.resolved
+
+# Local build output
+Build/
+dist/
+*.dmg
+*.zip
+
+# Local model cache — users download these on first launch.
+Models/*.bin
+!Models/.gitkeep
+
+# Generated icons
+App/AppIcon.iconset/
+
+# Development scratch space
+kiro-workspace/
+kiro-home/
+
+# macOS
+.DS_Store
+._*
+.Spotlight-V100
+.Trashes
+Icon?
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*~
+
+# Runtime data (must never leave the user's machine)
+Library/
+audio/
+chats.enc
+meeting-key.bin
+kiro-stderr.log
