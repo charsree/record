@@ -56,6 +56,27 @@ final class MeetingSession: ObservableObject {
     /// don't see broken features.
     @Published private(set) var kiroAvailable: Bool = false
 
+    /// Available audio input devices (built-in mic, USB, BlackHole, …).
+    /// Refreshed when the source-picker UI opens.
+    @Published private(set) var availableAudioInputs: [AudioInputDevice] = []
+    /// UID of the selected input device; nil = system default. Persisted.
+    @Published var selectedAudioInputUID: String? = UserDefaults.standard.string(forKey: "record.audioInputUID") {
+        didSet {
+            UserDefaults.standard.set(selectedAudioInputUID, forKey: "record.audioInputUID")
+            microphone.preferredDeviceUID = selectedAudioInputUID
+            // If a recording is live, restart the mic engine on the new
+            // device without touching the meeting/transcript.
+            if isRecording {
+                microphone.stop()
+                try? microphone.start()
+            }
+        }
+    }
+
+    func refreshAudioInputs() {
+        availableAudioInputs = AudioInputDevice.availableInputs()
+    }
+
     /// Re-scan for `kiro-cli`. Call after the user edits the
     /// "Kiro executable override" field in Preferences → Kiro.
     func refreshKiroAvailability() {
@@ -249,6 +270,7 @@ final class MeetingSession: ObservableObject {
         if !self.kiroAvailable {
             self.kiroEnabled = false
         }
+        microphone.preferredDeviceUID = selectedAudioInputUID
 
         microphone.onPacket = { [weak self] packet in
             guard let self else { return }
@@ -560,6 +582,18 @@ final class MeetingSession: ObservableObject {
 
     /// Inserts a "Chapter" marker into the transcript at the current time.
     /// Also persists to the current meeting if one is recording.
+    /// Clears the live transcript view. Only allowed when not recording —
+    /// the meeting that produced these segments is already safely stored
+    /// in History, so this just resets the Live pane for a fresh start.
+    func clearLiveTranscript() async {
+        guard !isRecording else { return }
+        await store.reset()
+        transcript = await store.all()
+        lastFinalizeAt.removeAll()
+        currentMeetingTitle = ""
+        recordingStartedAt = nil
+    }
+
     func insertChapter(title: String) async {
         let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
@@ -1056,9 +1090,12 @@ final class MeetingSession: ObservableObject {
             if database == nil {
                 database = try MeetingDatabase.production()
             }
-            // Preserve any chapter/note segments the user added before hitting
-            // Start — those should belong to the new meeting.
-            let preExisting = await store.all()
+            // Carry ONLY chapter/note segments the user added before hitting
+            // Start — those should belong to the new meeting. Speech from a
+            // previous recording must NOT leak into this one.
+            let preExisting = await store.all().filter {
+                $0.source == .chapter || $0.source == .note
+            }
             await store.reset()
             for segment in preExisting {
                 await store.append(segment)

@@ -858,6 +858,8 @@ private struct LiveControls: View {
         GroupBox("Capture") {
             VStack(alignment: .leading, spacing: 10) {
                 HStack(alignment: .center, spacing: 12) {
+                    micDevicePicker
+
                     Toggle("Include screen (OCR + Kiro attachments)", isOn: Binding(
                         get: { session.visualContextEnabled },
                         set: { _ in Task { await session.toggleVisualContext() } }
@@ -925,10 +927,65 @@ private struct LiveControls: View {
                         .foregroundStyle(.secondary)
                         .font(.caption)
                     Spacer()
+                    if !session.isRecording && !session.transcript.isEmpty {
+                        Button(role: .destructive) {
+                            Task { await session.clearLiveTranscript() }
+                        } label: {
+                            Label("Clear transcript", systemImage: "xmark.bin")
+                        }
+                        .buttonStyle(.borderless)
+                        .font(.caption)
+                        .help("Reset the Live pane for a fresh recording. The finished meeting stays in History.")
+                    }
                 }
             }
             .padding(.vertical, 4)
         }
+    }
+
+    /// Menu for choosing which input device feeds the "You" track —
+    /// built-in mic, USB interface, or a virtual loopback device like
+    /// BlackHole 2ch (existential.audio/blackhole) for piping another
+    /// app's audio into Record.
+    private var micDevicePicker: some View {
+        Menu {
+            Button {
+                session.selectedAudioInputUID = nil
+            } label: {
+                if session.selectedAudioInputUID == nil {
+                    Label("System default", systemImage: "checkmark")
+                } else {
+                    Text("System default")
+                }
+            }
+            Divider()
+            ForEach(session.availableAudioInputs) { device in
+                Button {
+                    session.selectedAudioInputUID = device.uid
+                } label: {
+                    if session.selectedAudioInputUID == device.uid {
+                        Label(device.name, systemImage: "checkmark")
+                    } else {
+                        Text(device.name)
+                    }
+                }
+            }
+            Divider()
+            Link("Get BlackHole (route app audio here)…",
+                 destination: URL(string: "https://existential.audio/blackhole/")!)
+        } label: {
+            Label(currentMicName, systemImage: "mic.badge.plus")
+                .lineLimit(1)
+        }
+        .menuStyle(.borderlessButton)
+        .fixedSize()
+        .onAppear { session.refreshAudioInputs() }
+        .help("Choose the input device — your mic, a USB interface, or a BlackHole virtual device")
+    }
+
+    private var currentMicName: String {
+        guard let uid = session.selectedAudioInputUID else { return "Default mic" }
+        return session.availableAudioInputs.first(where: { $0.uid == uid })?.name ?? "Default mic"
     }
 }
 
