@@ -24,8 +24,15 @@ _(Coming soon — record a screenshot & drop it in `docs/screenshots/`.)_
 ### Homebrew (recommended)
 
 ```sh
-brew tap charsree/record
-brew install --cask record
+brew tap charsree/tools
+brew install record
+```
+
+Then move the built app into your Applications folder:
+
+```sh
+cp -r "$(brew --prefix)/opt/record/Record.app" /Applications/
+open /Applications/Record.app
 ```
 
 ### Direct download
