@@ -73,6 +73,16 @@ jobs:
 
             app "Record.app"
 
+            # Record is ad-hoc signed (no paid Apple Developer ID yet).
+            # Homebrew Cask marks downloaded apps as quarantined, which
+            # triggers Gatekeeper's "cannot verify" dialog on first launch.
+            # Strip the quarantine bit so the app opens normally.
+            postflight do
+              system_command "/usr/bin/xattr",
+                             args: ["-dr", "com.apple.quarantine", "/Applications/Record.app"],
+                             must_succeed: false
+            end
+
             zap trash: [
               "~/Library/Application Support/Record",
               "~/Library/Preferences/dev.charsree.record.plist",

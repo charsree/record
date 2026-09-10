@@ -48,6 +48,19 @@ That's it. Record ends up at `/Applications/Record.app`, ready to launch from Sp
 
 <sub>Works on Intel and Apple Silicon Macs running macOS 26 or later. Homebrew downloads a signed pre-built app; no compilation required.</sub>
 
+<details>
+<summary><b>"Record can't be verified" on first launch?</b></summary>
+
+Record is ad-hoc signed (I don't have a paid Apple Developer ID). The cask automatically strips the quarantine bit so Gatekeeper doesn't block it. If macOS still shows the "cannot verify" dialog, run once:
+
+```sh
+xattr -dr com.apple.quarantine /Applications/Record.app
+open -a Record
+```
+
+Or right-click Record.app → Open → Open. Only needed the first time.
+</details>
+
 ## Features
 
 ### Capture
