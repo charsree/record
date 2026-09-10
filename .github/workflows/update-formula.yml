@@ -1,29 +1,23 @@
 name: Update Homebrew formula on release
 
-# Fires whenever you push a tag like `v0.3.0`. It:
-#   1. Grabs the tag's source tarball from GitHub
-#   2. Computes its SHA256
-#   3. Rewrites Formula/record.rb in charsree/homebrew-tools
-#   4. Commits and pushes that change
+# Fires whenever a `v*` tag is pushed AND the corresponding GitHub
+# Release with a Record-<version>.zip asset exists (created by
+# scripts/tag-release.sh). Rewrites Formula/record.rb in
+# charsree/homebrew-tools with the new url + sha256.
 #
-# ONE-TIME SETUP (before this can run):
-#   1. Create a GitHub Personal Access Token (fine-grained):
+# ONE-TIME SETUP (once):
+#   1. Create a fine-grained Personal Access Token:
 #      https://github.com/settings/personal-access-tokens/new
 #      • Resource owner: charsree
-#      • Repository access: Only select repositories → charsree/homebrew-tools
+#      • Repository access → Only select repositories → charsree/homebrew-tools
 #      • Repository permissions → Contents: Read and write
-#      • Save the generated token.
-#   2. Add it as a secret on THIS repo:
-#      Settings → Secrets and variables → Actions → New repository secret
-#      • Name: TAP_TOKEN
-#      • Value: (paste the token)
-#
-# From then on:  git tag v0.3.0 && git push --tags   → tap auto-updates.
+#   2. Add it as a repo secret on charsree/record:
+#      • Name:  TAP_TOKEN
+#      • Value: the PAT
 
 on:
-  push:
-    tags:
-      - "v*"
+  release:
+    types: [published]
 
 jobs:
   update-formula:
@@ -33,14 +27,23 @@ jobs:
         id: version
         run: echo "value=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
 
-      - name: Compute SHA256 of source tarball
+      - name: Wait a moment for the zip asset to fully propagate
+        run: sleep 5
+
+      - name: Compute SHA256 of the release zip
         id: sha
+        env:
+          VERSION: ${{ steps.version.outputs.value }}
+          REPO: ${{ github.repository }}
+          REF: ${{ github.ref_name }}
         run: |
-          tarball="https://github.com/${GITHUB_REPOSITORY}/archive/refs/tags/${GITHUB_REF_NAME}.tar.gz"
-          curl -sfL "$tarball" -o source.tar.gz
-          sha=$(sha256sum source.tar.gz | awk '{print $1}')
+          asset="https://github.com/${REPO}/releases/download/${REF}/Record-${VERSION}.zip"
+          echo "Fetching $asset"
+          curl -sfL "$asset" -o Record.zip
+          sha=$(sha256sum Record.zip | awk '{print $1}')
+          size=$(du -h Record.zip | awk '{print $1}')
           echo "value=$sha" >> "$GITHUB_OUTPUT"
-          echo "Tarball SHA256: $sha"
+          echo "SHA256: $sha (size: $size)"
 
       - name: Checkout homebrew-tools
         uses: actions/checkout@v4
@@ -60,37 +63,28 @@ jobs:
           class Record < Formula
             desc "Local-first macOS meeting assistant with mic, system audio, screen OCR, and Kiro chat"
             homepage "https://github.com/${REPO}"
-            url "https://github.com/${REPO}/archive/refs/tags/${REF}.tar.gz"
+            url "https://github.com/${REPO}/releases/download/${REF}/Record-${VERSION}.zip"
             sha256 "${SHA256}"
             version "${VERSION}"
             license "MIT"
 
             depends_on :macos
-            depends_on xcode: ["16.0", :build]
-            depends_on "whisper-cpp"
 
             def install
-              # Build the .app via our packaged build script.
-              system "chmod", "+x", "scripts/build-app.sh"
-              system "zsh", "scripts/build-app.sh"
+              # Pre-built .app bundle sits at the archive root because
+              # tag-release.sh zipped it with `ditto --keepParent`.
+              prefix.install "Record.app"
 
-              # Canonical copy inside the Cellar for Homebrew tracking.
-              # Prefix is /opt/homebrew/Cellar on Apple Silicon and
-              # /usr/local/Cellar on Intel — Homebrew handles the
-              # difference automatically.
-              prefix.install "Build/Record.app"
-
-              # Auto-install into /Applications so Launchpad / Spotlight /
-              # TCC treat Record like any drag-installed app. Falls back
-              # to a manual-copy caveat when /Applications isn't
-              # writable.
+              # Auto-install into /Applications so Launchpad / Spotlight
+              # / TCC treat it like any drag-installed app. Falls back to
+              # a caveats note when /Applications isn't writable.
               applications = "/Applications"
               if File.writable?(applications)
                 rm_rf "#{applications}/Record.app"
                 cp_r "#{prefix}/Record.app", "#{applications}/Record.app"
               end
 
-              # \`record\` in Terminal opens the installed app.
+              # \`record\` in Terminal opens the app.
               (bin/"record").write <<~SH
                 #!/bin/sh
                 exec open -a "Record" "\\\$@"
@@ -110,7 +104,7 @@ jobs:
                   system audio (Zoom/Meet/Teams/etc.) needs Screen Recording.
 
                   Pick a whisper model in Preferences → Transcription.
-                  large-v3-turbo is best for quality; base.en is smallest.
+                  large-v3-turbo is best; base.en is smallest / fastest.
 
                   Optional: install the Kiro CLI (https://kiro.dev) for chat,
                   auto-title, and auto-summary. Recording + transcription work
@@ -128,11 +122,6 @@ jobs:
                   Move it manually:
                     cp -R #{prefix}/Record.app /Applications/
                     open -a Record
-
-                  Then grant Microphone + Screen Recording and pick a whisper
-                  model in Preferences → Transcription.
-
-                  Data stays local at ~/Library/Application Support/Record/.
                 EOS
               end
             end
@@ -144,7 +133,7 @@ jobs:
           end
           EOF
 
-      - name: Commit and push to tap
+      - name: Commit and push
         working-directory: homebrew-tools
         run: |
           git config user.name "record-release-bot"
@@ -156,5 +145,5 @@ jobs:
           git add Formula/record.rb
           git commit -m "record: bump to ${{ steps.version.outputs.value }}
 
-          Automated by charsree/record release workflow."
+          Automated by the charsree/record release workflow."
           git push
