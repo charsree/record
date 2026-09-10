@@ -77,6 +77,12 @@ final class MeetingSession: ObservableObject {
         availableAudioInputs = AudioInputDevice.availableInputs()
     }
 
+    /// Which meeting scenario the user picked — controls whether we tap
+    /// the mic, capture system audio, or both. See MeetingScenario.
+    @Published var meetingScenario: MeetingScenario = MeetingScenario.load() {
+        didSet { meetingScenario.save() }
+    }
+
     /// Re-scan for `kiro-cli`. Call after the user edits the
     /// "Kiro executable override" field in Preferences → Kiro.
     func refreshKiroAvailability() {
@@ -508,9 +514,12 @@ final class MeetingSession: ObservableObject {
         isBusy = true
         defer { isBusy = false }
         do {
-            try await micTranscriber.start()
-            try microphone.start()
-            if systemAudioAvailable {
+            let scenario = meetingScenario
+            if scenario.capturesMicrophone {
+                try await micTranscriber.start()
+                try microphone.start()
+            }
+            if systemAudioAvailable, scenario.capturesSystemAudio {
                 try await systemTranscriber.start()
                 try await systemCapture.start(
                     includeVisualFrames: visualContextEnabled,
@@ -1081,7 +1090,7 @@ final class MeetingSession: ObservableObject {
         screenPermissionText = screenAllowed ? "Allowed" : "Denied"
         systemAudioAvailable = screenAllowed
         smokeLog("screen recording permission: \(screenAllowed)")
-        if !screenAllowed {
+        if !screenAllowed, meetingScenario.capturesSystemAudio {
             errorMessage = "Screen Recording permission is off — recording microphone only. Grant it in System Settings › Privacy & Security › Screen Recording to also capture what others say."
         }
 
@@ -1118,11 +1127,16 @@ final class MeetingSession: ObservableObject {
                 }
             }
             smokeLog("loading local whisper model")
-            try await micTranscriber.start()
-            transcriptionEngineText = "Local whisper loaded"
-            smokeLog("starting microphone engine")
-            try microphone.start()
-            if screenAllowed {
+            let scenario = meetingScenario
+            if scenario.capturesMicrophone {
+                try await micTranscriber.start()
+                transcriptionEngineText = "Local whisper loaded"
+                smokeLog("starting microphone engine")
+                try microphone.start()
+            } else {
+                transcriptionEngineText = "Local whisper loaded"
+            }
+            if screenAllowed, scenario.capturesSystemAudio {
                 try await systemTranscriber.start()
                 smokeLog("starting system audio capture")
                 try await systemCapture.start(
@@ -1130,10 +1144,15 @@ final class MeetingSession: ObservableObject {
                     displayID: selectedCaptureTarget.displayID,
                     windowID: selectedCaptureTarget.windowID
                 )
-                captureModeText = visualContextEnabled ? "Mic + system audio + screen" : "Mic + system audio"
-            } else {
-                captureModeText = "Mic only"
             }
+            captureModeText = {
+                switch (scenario.capturesMicrophone, screenAllowed && scenario.capturesSystemAudio) {
+                case (true, true): visualContextEnabled ? "Mic + system audio + screen" : "Mic + system audio"
+                case (true, false): "Mic only"
+                case (false, true): "System audio only"
+                case (false, false): "No sources?!"
+                }
+            }()
             isRecording = true
             recordingStartedAt = .now
             activeSegmentStart = .now

@@ -857,6 +857,26 @@ private struct LiveControls: View {
     var body: some View {
         GroupBox("Capture") {
             VStack(alignment: .leading, spacing: 10) {
+                // Scenario picker: how are you meeting? Configures which
+                // sources get captured so users don't reason about audio
+                // routing themselves.
+                HStack(alignment: .center, spacing: 10) {
+                    Picker("", selection: $session.meetingScenario) {
+                        ForEach(MeetingScenario.allCases) { scenario in
+                            Label(scenario.title, systemImage: scenario.icon)
+                                .tag(scenario)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                    .fixedSize()
+                    .disabled(session.isRecording)
+                    .help("Pick how you're meeting — this sets which audio sources are captured")
+                    Text(session.meetingScenario.explanation)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
                 HStack(alignment: .center, spacing: 12) {
                     micDevicePicker
 
