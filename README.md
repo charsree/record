@@ -26,14 +26,11 @@ _(Coming soon — record a screenshot & drop it in `docs/screenshots/`.)_
 ```sh
 brew tap charsree/tools
 brew install record
-```
-
-Then move the built app into your Applications folder:
-
-```sh
 cp -r "$(brew --prefix)/opt/record/Record.app" /Applications/
-open /Applications/Record.app
+open -a Record
 ```
+
+Homebrew builds Record from source into its Cellar; the `cp` step copies the built app into your Applications folder so Launchpad / Spotlight / TCC treat it as a normal app.
 
 ### Direct download
 
