@@ -8,7 +8,6 @@
 <p align="center">
   <a href="https://github.com/charsree/record/releases"><img src="https://img.shields.io/github/v/release/charsree/record?label=version" alt="version"></a>
   <a href="./LICENSE"><img src="https://img.shields.io/github/license/charsree/record" alt="license"></a>
-  <a href="https://github.com/charsree/record/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/charsree/record/ci.yml?label=build" alt="build"></a>
   <img src="https://img.shields.io/badge/macOS-26%2B-000?logo=apple&logoColor=white" alt="macOS 26+">
 </p>
 
