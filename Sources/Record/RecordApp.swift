@@ -618,7 +618,8 @@ private struct LivePane: View {
                 onAddAttachments: { urls in session.addAttachments(from: urls) },
                 onAddPastedText: { text, label in session.addPastedText(text, label: label) },
                 onRemoveAttachment: { id in session.removeAttachment(id) },
-                onCancel: { Task { await session.cancelAsk() } }
+                onCancel: { Task { await session.cancelAsk() } },
+                kiroAvailable: session.kiroAvailable
             )
             TranscriptListView(
                 segments: session.transcript,
@@ -961,7 +962,8 @@ private struct HistoryPane: View {
                 onAddAttachments: { urls in session.addAttachments(from: urls) },
                 onAddPastedText: { text, label in session.addPastedText(text, label: label) },
                 onRemoveAttachment: { id in session.removeAttachment(id) },
-                onCancel: { Task { await session.cancelAsk() } }
+                onCancel: { Task { await session.cancelAsk() } },
+                kiroAvailable: session.kiroAvailable
             )
 
             if MeetingAudioRecorder.hasAudio(for: meeting.id) {
@@ -1237,6 +1239,9 @@ private struct AskPanel: View {
     var onRemoveAttachment: ((ChatAttachment.ID) -> Void)? = nil
     var onCancel: (() -> Void)? = nil
     var onCopy: (() -> Void)? = nil
+    /// When false, Kiro CLI wasn't found on the machine — we render an
+    /// install-hint banner and disable the composer.
+    var kiroAvailable: Bool = true
 
     @State private var presentPasteSheet = false
 
@@ -1260,6 +1265,10 @@ private struct AskPanel: View {
                         .buttonStyle(.borderless)
                         .help("Start a fresh conversation (drops previous context)")
                     }
+                }
+
+                if !kiroAvailable {
+                    KiroUnavailableBanner()
                 }
 
                 if !turns.isEmpty {
@@ -1319,6 +1328,7 @@ private struct AskPanel: View {
                     }
                     TextField(turns.isEmpty ? placeholder : "Follow up…", text: $question)
                         .textFieldStyle(.roundedBorder)
+                        .disabled(!kiroAvailable)
                         .onSubmit { submit() }
                     if isAsking {
                         Button("Cancel", role: .destructive) { onCancel?() }
@@ -1326,7 +1336,7 @@ private struct AskPanel: View {
                     } else {
                         Button(turns.isEmpty ? "Ask" : "Send") { submit() }
                             .keyboardShortcut(.return, modifiers: [.command])
-                            .disabled(question.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                            .disabled(!kiroAvailable || question.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                     }
                 }
                 if !attachments.isEmpty {
@@ -1370,6 +1380,31 @@ private struct AskPanel: View {
         guard let text = NSPasteboard.general.string(forType: .string),
               !text.isEmpty else { return }
         onAddPastedText?(text, nil)
+    }
+}
+
+/// Non-blocking banner shown in place of the chat when kiro-cli isn't
+/// available. Explains the local-first tradeoff and links to install.
+private struct KiroUnavailableBanner: View {
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: "sparkles")
+                .font(.title3)
+                .foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Kiro CLI isn't installed")
+                    .font(.subheadline.weight(.semibold))
+                Text("Recording, transcription, search, and export all work without Kiro. Install the CLI to enable chat, auto-summaries, and auto-titles.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Link("Install Kiro CLI", destination: URL(string: "https://kiro.dev/download")!)
+                    .font(.caption.weight(.medium))
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(10)
+        .background(.tertiary.opacity(0.3), in: RoundedRectangle(cornerRadius: 8))
     }
 }
 
@@ -1828,7 +1863,8 @@ private struct AskAllPane: View {
                 onAddAttachments: { urls in session.addAttachments(from: urls) },
                 onAddPastedText: { text, label in session.addPastedText(text, label: label) },
                 onRemoveAttachment: { id in session.removeAttachment(id) },
-                onCancel: { Task { await session.cancelAsk() } }
+                onCancel: { Task { await session.cancelAsk() } },
+                kiroAvailable: session.kiroAvailable
             )
         }
         .padding(22)

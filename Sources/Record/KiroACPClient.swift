@@ -50,6 +50,13 @@ struct KiroACPClient {
         return KiroConversation(executable: executable, timeout: effectiveTimeout)
     }
 
+    /// True iff we can find a `kiro-cli` binary. Used by the UI to hide /
+    /// disable AI features when the user hasn't installed Kiro. This is a
+    /// cheap filesystem lookup, safe to call from `@MainActor`.
+    func isAvailable() -> Bool {
+        executablePath() != nil
+    }
+
     private func executablePath() -> String? {
         if let configuredExecutable, FileManager.default.isExecutableFile(atPath: configuredExecutable) {
             return resolveSymlinks(configuredExecutable)

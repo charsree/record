@@ -49,6 +49,22 @@ final class MeetingSession: ObservableObject {
             if !kiroEnabled { Task { await resetChat() } }
         }
     }
+    /// True iff a `kiro-cli` binary is discoverable on this machine.
+    /// Refreshed on launch and whenever the user updates the executable
+    /// override in Preferences. The UI hides chat + auto-summary
+    /// controls when this is false so users who haven't installed Kiro
+    /// don't see broken features.
+    @Published private(set) var kiroAvailable: Bool = false
+
+    /// Re-scan for `kiro-cli`. Call after the user edits the
+    /// "Kiro executable override" field in Preferences → Kiro.
+    func refreshKiroAvailability() {
+        let available = kiro.isAvailable()
+        kiroAvailable = available
+        if !available {
+            kiroEnabled = false
+        }
+    }
 
     // History state
     @Published private(set) var history: [MeetingRecord] = []
@@ -225,6 +241,15 @@ final class MeetingSession: ObservableObject {
     }
 
     init() {
+        // Detect kiro-cli up front so the UI can hide AI features when
+        // the user hasn't installed it. This is a cheap filesystem probe
+        // (no subprocess launch) that we redo whenever the user tweaks
+        // the executable-override in Preferences.
+        self.kiroAvailable = kiro.isAvailable()
+        if !self.kiroAvailable {
+            self.kiroEnabled = false
+        }
+
         microphone.onPacket = { [weak self] packet in
             guard let self else { return }
             if self.micMuted { return }
@@ -1211,6 +1236,9 @@ final class MeetingSession: ObservableObject {
     /// then saves both back to the database. Runs on a throwaway Kiro
     /// conversation so it doesn't touch the user's live chat.
     private func autoAnnotate(meetingID: UUID, segments: [TranscriptSegment]) async {
+        // Nothing to do without Kiro — recording + transcription work
+        // without it, but summaries require the subprocess.
+        guard kiroAvailable, kiroEnabled else { return }
         let wantTitle = UserDefaults.standard.object(forKey: "record.autoTitleOnStop") == nil
             ? true : UserDefaults.standard.bool(forKey: "record.autoTitleOnStop")
         let wantSummary = UserDefaults.standard.object(forKey: "record.autoSummaryOnStop") == nil

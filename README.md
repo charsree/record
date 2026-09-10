@@ -13,6 +13,26 @@
 
 ---
 
+## Do I need Kiro?
+
+**No — everything except the chat features works without it.**
+
+| Feature | Kiro required? |
+| --- | --- |
+| Record mic + system audio | ❌ no |
+| Local whisper transcription | ❌ no |
+| Search, tags, chapters, notes, edit, star | ❌ no |
+| Waveform playback + per-track mute | ❌ no |
+| Snap-and-OCR, screen capture | ❌ no |
+| Export as TXT / MD / SRT / VTT / JSON | ❌ no |
+| Scheduled recordings, auto-detect calls | ❌ no |
+| Passphrase lock, encrypted at rest | ❌ no |
+| **Chat with a meeting / with everything** | ✅ yes |
+| **Auto-generated titles + summaries** | ✅ yes |
+| **Quick actions** (Summarize / Action items / Draft email) | ✅ yes |
+
+If Kiro isn't installed, Record silently disables the AI panel and shows a subtle "Install Kiro CLI" hint. You can install it any time from [kiro.dev](https://kiro.dev/download) — Record will pick it up automatically on next launch (or Preferences → Kiro → Re-detect).
+
 ## Why Record
 
 Every meeting-assistant tool ships your audio and transcripts to somebody else's servers. Record doesn't. Everything — audio capture, transcription, semantic chat, storage — happens on your Mac. The only outbound network calls are the whisper model downloads you initiate yourself, and the Kiro CLI subprocess when you use the chat features.
