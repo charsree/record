@@ -70,42 +70,71 @@ jobs:
             depends_on "whisper-cpp"
 
             def install
-              # Build the app.
+              # Build the .app via our packaged build script.
               system "chmod", "+x", "scripts/build-app.sh"
               system "zsh", "scripts/build-app.sh"
 
-              # Install the app bundle to the prefix.
+              # Canonical copy inside the Cellar for Homebrew tracking.
+              # Prefix is /opt/homebrew/Cellar on Apple Silicon and
+              # /usr/local/Cellar on Intel — Homebrew handles the
+              # difference automatically.
               prefix.install "Build/Record.app"
+
+              # Auto-install into /Applications so Launchpad / Spotlight /
+              # TCC treat Record like any drag-installed app. Falls back
+              # to a manual-copy caveat when /Applications isn't
+              # writable.
+              applications = "/Applications"
+              if File.writable?(applications)
+                rm_rf "#{applications}/Record.app"
+                cp_r "#{prefix}/Record.app", "#{applications}/Record.app"
+              end
+
+              # \`record\` in Terminal opens the installed app.
+              (bin/"record").write <<~SH
+                #!/bin/sh
+                exec open -a "Record" "\\\$@"
+              SH
+              chmod 0755, bin/"record"
             end
 
             def caveats
-              <<~EOS
-                Record has been installed to:
-                  #{prefix}/Record.app
+              if File.exist?("/Applications/Record.app")
+                <<~EOS
+                  Record was installed to /Applications/Record.app.
 
-                To use Record:
-                  1. Copy to Applications: cp -r #{prefix}/Record.app /Applications/
-                  2. Launch: open /Applications/Record.app
-                  3. Grant Microphone + Screen Recording when macOS prompts.
-                  4. Open Preferences → Transcription to download a whisper model.
-                     large-v3-turbo is best; base.en is smallest/fastest.
+                  Launch it:
+                    open -a Record        # or just: record
 
-                Optional: install the Kiro CLI (https://kiro.dev) to enable the
-                chat, auto-summary, and auto-title features. Recording and
-                transcription work without it.
+                  First launch asks for Microphone + Screen Recording. Grant both —
+                  system audio (Zoom/Meet/Teams/etc.) needs Screen Recording.
 
-                Features:
-                  🎙️  Microphone + system audio capture (Zoom/Meet/Teams/Chime)
-                  🧠  Local whisper.cpp transcription (multi-language + translation)
-                  🔍  Snap-and-OCR any screen region
-                  💬  Chat over one meeting, all meetings, or ad-hoc via Kiro
-                  ⭐  Star / edit / play-from-here segments
-                  🗓️  Scheduled recordings + auto-detect video calls
-                  🔒  AES-GCM encrypted transcripts and chats at rest
+                  Pick a whisper model in Preferences → Transcription.
+                  large-v3-turbo is best for quality; base.en is smallest.
 
-                All meeting data stays on your Mac at:
-                  ~/Library/Application Support/Record/
-              EOS
+                  Optional: install the Kiro CLI (https://kiro.dev) for chat,
+                  auto-title, and auto-summary. Recording + transcription work
+                  without it.
+
+                  Data stays local, AES-GCM encrypted at
+                  ~/Library/Application Support/Record/.
+                EOS
+              else
+                <<~EOS
+                  Record has been installed to:
+                    #{prefix}/Record.app
+
+                  We couldn't auto-copy it to /Applications (permission denied).
+                  Move it manually:
+                    cp -R #{prefix}/Record.app /Applications/
+                    open -a Record
+
+                  Then grant Microphone + Screen Recording and pick a whisper
+                  model in Preferences → Transcription.
+
+                  Data stays local at ~/Library/Application Support/Record/.
+                EOS
+              end
             end
 
             test do
