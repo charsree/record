@@ -73,26 +73,45 @@ jobs:
               system "chmod", "+x", "scripts/build-app.sh"
               system "zsh", "scripts/build-app.sh"
               prefix.install "Build/Record.app"
+
+              # Copy the built app into /Applications so it shows up in
+              # Launchpad, Spotlight and TCC just like any other GUI app.
+              # If /Applications isn't writable (locked down machine),
+              # fall back to a caveat pointing at the Cellar copy.
+              applications = "/Applications"
+              if File.writable?(applications)
+                system "rm", "-rf", "#{applications}/Record.app"
+                system "cp", "-R", "#{prefix}/Record.app", "#{applications}/"
+              end
+
+              # Convenience CLI: type "record" in Terminal to launch the
+              # installed app.
+              (bin/"record").write <<~SH
+                #!/bin/sh
+                exec open -a "Record" "\\\$@"
+              SH
+              chmod 0755, bin/"record"
             end
 
             def caveats
               <<~EOS
-                Record has been installed to:
-                  #{prefix}/Record.app
+                Record was installed to /Applications/Record.app.
 
-                To use Record:
-                  1. Copy to Applications: cp -r #{prefix}/Record.app /Applications/
-                  2. Launch: open /Applications/Record.app
-                  3. Grant Microphone and Screen Recording permissions when prompted.
-                  4. Open Preferences → Transcription to download a whisper model
-                     (large-v3-turbo recommended for best quality).
+                Launch it from Launchpad, Spotlight, or:
+                  open -a Record        # or just: record
 
-                Optional: install the Kiro CLI (https://kiro.dev) to enable the
-                chat, auto-summary, and auto-title features. Recording and
-                transcription work without it.
+                On first launch macOS will ask for Microphone + Screen Recording.
+                Grant both — system audio (Zoom/Meet/etc.) requires Screen Recording.
 
-                All meeting data stays on your Mac, encrypted with AES-GCM at:
-                  ~/Library/Application Support/Record/
+                Open Preferences → Transcription to pick a whisper model.
+                large-v3-turbo is best for quality; base.en is smallest/fastest.
+
+                Optional: install the Kiro CLI (https://kiro.dev) for chat,
+                auto-title, and auto-summary. Recording/transcription work
+                without it.
+
+                All meeting data stays on your Mac, encrypted with AES-GCM at
+                ~/Library/Application Support/Record/.
               EOS
             end
 
