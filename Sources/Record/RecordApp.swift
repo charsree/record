@@ -10,9 +10,9 @@ struct RecordApp: App {
     var body: some Scene {
         WindowGroup("Record", id: RecordWindows.main) {
             MainWindow(session: session)
-                .frame(minWidth: 900, minHeight: 620)
+                .frame(minWidth: 780, minHeight: 540)
         }
-        .defaultSize(width: 1_080, height: 720)
+        .defaultSize(width: 1_120, height: 740)
 
         Settings {
             PreferencesWindow()
@@ -193,6 +193,11 @@ private enum SidebarSelection: Hashable {
 private struct MainWindow: View {
     @ObservedObject var session: MeetingSession
     @State private var selection: SidebarSelection? = .live
+    /// Force the sidebar to stay visible even on narrow windows.
+    /// Without this, `NavigationSplitView` on macOS auto-collapses the
+    /// sidebar on smaller screens (e.g. 13-inch MacBook Air), making it
+    /// look like the app is missing half its UI.
+    @State private var sidebarVisibility: NavigationSplitViewVisibility = .all
     @StateObject private var lock = AppLock.shared
 
     var body: some View {
@@ -208,9 +213,10 @@ private struct MainWindow: View {
 
     @ViewBuilder
     private var content: some View {
-        NavigationSplitView {
+        NavigationSplitView(columnVisibility: $sidebarVisibility) {
             Sidebar(session: session, selection: $selection)
-                .navigationSplitViewColumnWidth(min: 240, ideal: 280, max: 360)
+                .navigationSplitViewColumnWidth(min: 220, ideal: 260, max: 340)
+                .toolbar(removing: .sidebarToggle)
         } detail: {
             Group {
                 switch selection {
@@ -601,38 +607,40 @@ private struct LivePane: View {
     @State private var noteSheet = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            LiveHeader(session: session)
-            LiveControls(session: session, pickingSource: $pickingSource)
-            if let message = session.errorMessage {
-                CalloutView(message: message)
+        ScrollView {
+            VStack(alignment: .leading, spacing: 14) {
+                LiveHeader(session: session)
+                LiveControls(session: session, pickingSource: $pickingSource)
+                if let message = session.errorMessage {
+                    CalloutView(message: message)
+                }
+                AskPanel(
+                    question: $question,
+                    turns: session.chatTurns,
+                    isAsking: session.isAsking,
+                    placeholder: "Ask about this meeting…",
+                    onSubmit: { text in Task { await session.ask(text) } },
+                    onReset: { Task { await session.startNewChat() } },
+                    attachments: session.pendingAttachments,
+                    onAddAttachments: { urls in session.addAttachments(from: urls) },
+                    onAddPastedText: { text, label in session.addPastedText(text, label: label) },
+                    onRemoveAttachment: { id in session.removeAttachment(id) },
+                    onCancel: { Task { await session.cancelAsk() } },
+                    kiroAvailable: session.kiroAvailable
+                )
+                TranscriptListView(
+                    segments: session.transcript,
+                    emptyText: "The transcript appears here as people speak.",
+                    onToggleStar: { id in Task { await session.toggleStar(segmentID: id) } },
+                    onEdit: { id, text in Task { await session.editSegment(id: id, newText: text) } },
+                    meetingTitle: session.currentMeetingTitle.isEmpty ? "Live meeting" : session.currentMeetingTitle,
+                    meetingStartedAt: session.recordingStartedAt ?? .now,
+                    enableDownload: true
+                )
             }
-            AskPanel(
-                question: $question,
-                turns: session.chatTurns,
-                isAsking: session.isAsking,
-                placeholder: "Ask about this meeting…",
-                onSubmit: { text in Task { await session.ask(text) } },
-                onReset: { Task { await session.startNewChat() } },
-                attachments: session.pendingAttachments,
-                onAddAttachments: { urls in session.addAttachments(from: urls) },
-                onAddPastedText: { text, label in session.addPastedText(text, label: label) },
-                onRemoveAttachment: { id in session.removeAttachment(id) },
-                onCancel: { Task { await session.cancelAsk() } },
-                kiroAvailable: session.kiroAvailable
-            )
-            TranscriptListView(
-                segments: session.transcript,
-                emptyText: "The transcript appears here as people speak.",
-                onToggleStar: { id in Task { await session.toggleStar(segmentID: id) } },
-                onEdit: { id, text in Task { await session.editSegment(id: id, newText: text) } },
-                meetingTitle: session.currentMeetingTitle.isEmpty ? "Live meeting" : session.currentMeetingTitle,
-                meetingStartedAt: session.recordingStartedAt ?? .now,
-                enableDownload: true
-            )
+            .padding(22)
+            .frame(maxWidth: .infinity, alignment: .topLeading)
         }
-        .padding(22)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .sheet(isPresented: $pickingSource) {
             SourcePickerSheet(session: session)
         }
@@ -938,66 +946,68 @@ private struct HistoryPane: View {
     @State private var peaks: [Float] = []
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HistoryHeader(
-                meeting: meeting,
-                titleDraft: $titleDraft,
-                onCommit: { newTitle in Task { await session.renameSelectedMeeting(newTitle) } },
-                onAddTag: { tag in Task { await session.addTagToSelected(tag) } },
-                onRemoveTag: { tag in Task { await session.removeTagFromSelected(tag) } }
-            )
+        ScrollView {
+            VStack(alignment: .leading, spacing: 14) {
+                HistoryHeader(
+                    meeting: meeting,
+                    titleDraft: $titleDraft,
+                    onCommit: { newTitle in Task { await session.renameSelectedMeeting(newTitle) } },
+                    onAddTag: { tag in Task { await session.addTagToSelected(tag) } },
+                    onRemoveTag: { tag in Task { await session.removeTagFromSelected(tag) } }
+                )
 
-            if let message = session.historyStatusMessage {
-                CalloutView(message: message)
-            }
+                if let message = session.historyStatusMessage {
+                    CalloutView(message: message)
+                }
 
-            AskPanel(
-                question: $question,
-                turns: session.chatTurns,
-                isAsking: session.isAsking,
-                placeholder: "Ask this meeting…",
-                onSubmit: { text in Task { await session.askHistoryQuestion(text) } },
-                onReset: { Task { await session.startNewChat() } },
-                attachments: session.pendingAttachments,
-                onAddAttachments: { urls in session.addAttachments(from: urls) },
-                onAddPastedText: { text, label in session.addPastedText(text, label: label) },
-                onRemoveAttachment: { id in session.removeAttachment(id) },
-                onCancel: { Task { await session.cancelAsk() } },
-                kiroAvailable: session.kiroAvailable
-            )
+                AskPanel(
+                    question: $question,
+                    turns: session.chatTurns,
+                    isAsking: session.isAsking,
+                    placeholder: "Ask this meeting…",
+                    onSubmit: { text in Task { await session.askHistoryQuestion(text) } },
+                    onReset: { Task { await session.startNewChat() } },
+                    attachments: session.pendingAttachments,
+                    onAddAttachments: { urls in session.addAttachments(from: urls) },
+                    onAddPastedText: { text, label in session.addPastedText(text, label: label) },
+                    onRemoveAttachment: { id in session.removeAttachment(id) },
+                    onCancel: { Task { await session.cancelAsk() } },
+                    kiroAvailable: session.kiroAvailable
+                )
 
-            if MeetingAudioRecorder.hasAudio(for: meeting.id) {
-                AudioPlayerBar(player: player, peaks: peaks, meetingID: meeting.id, onSeek: { fraction in
-                    player.seek(to: fraction * player.duration)
-                })
-            }
+                if MeetingAudioRecorder.hasAudio(for: meeting.id) {
+                    AudioPlayerBar(player: player, peaks: peaks, meetingID: meeting.id, onSeek: { fraction in
+                        player.seek(to: fraction * player.duration)
+                    })
+                }
 
-            TranscriptListView(
-                segments: session.selectedHistoryTranscript,
-                emptyText: "This meeting has no transcript segments.",
-                onToggleStar: { id in Task { await session.toggleStarInSelectedHistory(segmentID: id) } },
-                onEdit: { id, text in Task { await session.editHistorySegment(id: id, newText: text) } },
-                onSegmentTap: { segment in
-                    guard MeetingAudioRecorder.hasAudio(for: meeting.id) else { return }
-                    let offset = segment.timestamp.timeIntervalSince(meeting.startedAt)
-                    player.seek(to: max(0, offset))
-                    if !player.isPlaying { player.play() }
-                },
-                meetingTitle: meeting.displayTitle,
-                meetingStartedAt: meeting.startedAt,
-                meetingSummary: meeting.summary,
-                meetingTags: meeting.tags,
-                enableDownload: true
-            )
+                TranscriptListView(
+                    segments: session.selectedHistoryTranscript,
+                    emptyText: "This meeting has no transcript segments.",
+                    onToggleStar: { id in Task { await session.toggleStarInSelectedHistory(segmentID: id) } },
+                    onEdit: { id, text in Task { await session.editHistorySegment(id: id, newText: text) } },
+                    onSegmentTap: { segment in
+                        guard MeetingAudioRecorder.hasAudio(for: meeting.id) else { return }
+                        let offset = segment.timestamp.timeIntervalSince(meeting.startedAt)
+                        player.seek(to: max(0, offset))
+                        if !player.isPlaying { player.play() }
+                    },
+                    meetingTitle: meeting.displayTitle,
+                    meetingStartedAt: meeting.startedAt,
+                    meetingSummary: meeting.summary,
+                    meetingTags: meeting.tags,
+                    enableDownload: true
+                )
 
-            if !session.relatedMeetings.isEmpty {
-                RelatedMeetingsFooter(meetings: session.relatedMeetings) { meeting in
-                    Task { await session.selectHistoryMeeting(meeting) }
+                if !session.relatedMeetings.isEmpty {
+                    RelatedMeetingsFooter(meetings: session.relatedMeetings) { meeting in
+                        Task { await session.selectHistoryMeeting(meeting) }
+                    }
                 }
             }
+            .padding(22)
+            .frame(maxWidth: .infinity, alignment: .topLeading)
         }
-        .padding(22)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .toolbar {
             ToolbarItemGroup(placement: .primaryAction) {
                 Button {
@@ -1837,38 +1847,40 @@ private struct AskAllPane: View {
     @State private var question = ""
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(spacing: 10) {
-                    Image(systemName: "books.vertical.fill")
-                        .foregroundStyle(Color.accentColor)
-                    Text("Ask across all meetings")
-                        .font(.largeTitle.bold())
+        ScrollView {
+            VStack(alignment: .leading, spacing: 14) {
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: 10) {
+                        Image(systemName: "books.vertical.fill")
+                            .foregroundStyle(Color.accentColor)
+                        Text("Ask across all meetings")
+                            .font(.largeTitle.bold())
+                    }
+                    Text("Kiro's answer draws evidence from your entire meeting archive (\(session.history.count) meetings). Everything stays on-device.")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
                 }
-                Text("Kiro's answer draws evidence from your entire meeting archive (\(session.history.count) meetings). Everything stays on-device.")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
+                if let message = session.errorMessage {
+                    CalloutView(message: message)
+                }
+                AskPanel(
+                    question: $question,
+                    turns: session.chatTurns,
+                    isAsking: session.isAsking,
+                    placeholder: "e.g. What did I promise the team last month?",
+                    onSubmit: { text in Task { await session.askAcrossAllMeetings(text) } },
+                    onReset: { Task { await session.startNewChat() } },
+                    attachments: session.pendingAttachments,
+                    onAddAttachments: { urls in session.addAttachments(from: urls) },
+                    onAddPastedText: { text, label in session.addPastedText(text, label: label) },
+                    onRemoveAttachment: { id in session.removeAttachment(id) },
+                    onCancel: { Task { await session.cancelAsk() } },
+                    kiroAvailable: session.kiroAvailable
+                )
             }
-            if let message = session.errorMessage {
-                CalloutView(message: message)
-            }
-            AskPanel(
-                question: $question,
-                turns: session.chatTurns,
-                isAsking: session.isAsking,
-                placeholder: "e.g. What did I promise the team last month?",
-                onSubmit: { text in Task { await session.askAcrossAllMeetings(text) } },
-                onReset: { Task { await session.startNewChat() } },
-                attachments: session.pendingAttachments,
-                onAddAttachments: { urls in session.addAttachments(from: urls) },
-                onAddPastedText: { text, label in session.addPastedText(text, label: label) },
-                onRemoveAttachment: { id in session.removeAttachment(id) },
-                onCancel: { Task { await session.cancelAsk() } },
-                kiroAvailable: session.kiroAvailable
-            )
+            .padding(22)
+            .frame(maxWidth: .infinity, alignment: .topLeading)
         }
-        .padding(22)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 }
 
