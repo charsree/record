@@ -40,14 +40,13 @@ Every meeting-assistant tool ships your audio and transcripts to somebody else's
 ## Install
 
 ```sh
-brew tap charsree/tools
-brew install record
+brew install --cask charsree/tools/record
 open -a Record
 ```
 
-That's it. Record ends up at `/Applications/Record.app`. You can also type `record` in Terminal to launch it.
+That's it. Record ends up at `/Applications/Record.app`, ready to launch from Spotlight or Launchpad.
 
-<sub>Works on Intel and Apple Silicon Macs running macOS 26 or later. Homebrew builds it from source (~30 seconds) and depends on `whisper-cpp`.</sub>
+<sub>Works on Intel and Apple Silicon Macs running macOS 26 or later. Homebrew downloads a signed pre-built app; no compilation required.</sub>
 
 ## Features
 
