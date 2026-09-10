@@ -16,8 +16,16 @@ final class LocalSpeechTranscriber {
     var translate: Bool = false
 
     private let targetSampleRate: Double = 16_000
-    /// Emit an updated partial once this much fresh audio has arrived.
-    private let partialIntervalSamples = 16_000 * 1        // was 2s → too coarse
+    /// How much fresh audio should accumulate before we consider asking
+    /// whisper for another partial. We ALSO gate on `partialInFlight`
+    /// below, so on slower models (large-v3-turbo, medium) we simply
+    /// skip requests until the previous one finishes — no queueing.
+    private let partialIntervalSamples = 16_000 * 1
+    /// True while a partial-whisper call is running. We refuse to fire
+    /// a new one until it returns, so partials never back up on slower
+    /// models and the on-screen text stays as close to real time as the
+    /// model allows.
+    private var partialInFlight: Bool = false
     /// Force a final flush at this length even if the user hasn't paused.
     /// Kept small so a run-on speaker (or two people back-to-back with no
     /// 500ms gap) still turns into multiple separate transcript segments
@@ -101,7 +109,7 @@ final class LocalSpeechTranscriber {
             utteranceSamples.append(contentsOf: frame)
             trailingSilenceSamples = 0
             samplesSinceLastPartial += frame.count
-            if samplesSinceLastPartial >= partialIntervalSamples {
+            if samplesSinceLastPartial >= partialIntervalSamples, !partialInFlight {
                 samplesSinceLastPartial = 0
                 requestPartial()
             }
@@ -124,6 +132,7 @@ final class LocalSpeechTranscriber {
         guard utteranceSamples.count >= minimumUtteranceSamples else { return }
         let snapshot = utteranceSamples
         let generation = self.generation
+        partialInFlight = true
         submit(snapshot, generation: generation, isFinal: false)
     }
 
@@ -143,6 +152,7 @@ final class LocalSpeechTranscriber {
         // just-finalized segment as a new live one with stale text.
         for task in pendingWork { task.cancel() }
         pendingWork.removeAll()
+        partialInFlight = false
         resetUtterance()
         utteranceSamples = carry
         guard samples.count >= minimumUtteranceSamples else { return }
@@ -154,6 +164,7 @@ final class LocalSpeechTranscriber {
         trailingSilenceSamples = 0
         samplesSinceLastPartial = 0
         lastPartialText = ""
+        partialInFlight = false
     }
 
     /// Decide whether a new whisper partial should replace what's on
@@ -220,6 +231,7 @@ final class LocalSpeechTranscriber {
                 let cleaned = WhisperText.cleaned(raw)
                 await MainActor.run {
                     guard let self, self.generation == generation else { return }
+                    if !isFinal { self.partialInFlight = false }
                     if Task.isCancelled { return }
                     guard !cleaned.isEmpty else {
                         if isFinal { self.lastPartialText = "" }
@@ -237,6 +249,7 @@ final class LocalSpeechTranscriber {
                 if Task.isCancelled { return }
                 await MainActor.run {
                     guard let self, self.generation == generation else { return }
+                    if !isFinal { self.partialInFlight = false }
                     self.onError?(error.localizedDescription)
                 }
             }
