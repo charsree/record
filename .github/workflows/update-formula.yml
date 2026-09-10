@@ -1,0 +1,119 @@
+name: Update Homebrew formula on release
+
+# Fires whenever you push a tag like `v0.3.0`. It:
+#   1. Grabs the tag's source tarball from GitHub
+#   2. Computes its SHA256
+#   3. Rewrites Formula/record.rb in charsree/homebrew-tools
+#   4. Commits and pushes that change
+#
+# ONE-TIME SETUP (before this can run):
+#   1. Create a GitHub Personal Access Token (fine-grained):
+#      https://github.com/settings/personal-access-tokens/new
+#      • Resource owner: charsree
+#      • Repository access: Only select repositories → charsree/homebrew-tools
+#      • Repository permissions → Contents: Read and write
+#      • Save the generated token.
+#   2. Add it as a secret on THIS repo:
+#      Settings → Secrets and variables → Actions → New repository secret
+#      • Name: TAP_TOKEN
+#      • Value: (paste the token)
+#
+# From then on:  git tag v0.3.0 && git push --tags   → tap auto-updates.
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  update-formula:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Extract version from tag
+        id: version
+        run: echo "value=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Compute SHA256 of source tarball
+        id: sha
+        run: |
+          tarball="https://github.com/${GITHUB_REPOSITORY}/archive/refs/tags/${GITHUB_REF_NAME}.tar.gz"
+          curl -sfL "$tarball" -o source.tar.gz
+          sha=$(sha256sum source.tar.gz | awk '{print $1}')
+          echo "value=$sha" >> "$GITHUB_OUTPUT"
+          echo "Tarball SHA256: $sha"
+
+      - name: Checkout homebrew-tools
+        uses: actions/checkout@v4
+        with:
+          repository: charsree/homebrew-tools
+          token: ${{ secrets.TAP_TOKEN }}
+          path: homebrew-tools
+
+      - name: Rewrite Formula/record.rb
+        env:
+          VERSION: ${{ steps.version.outputs.value }}
+          SHA256: ${{ steps.sha.outputs.value }}
+          REPO: ${{ github.repository }}
+          REF: ${{ github.ref_name }}
+        run: |
+          cat > homebrew-tools/Formula/record.rb <<EOF
+          class Record < Formula
+            desc "Local-first macOS meeting assistant with mic, system audio, screen OCR, and Kiro chat"
+            homepage "https://github.com/${REPO}"
+            url "https://github.com/${REPO}/archive/refs/tags/${REF}.tar.gz"
+            sha256 "${SHA256}"
+            version "${VERSION}"
+            license "MIT"
+
+            depends_on :macos
+            depends_on xcode: ["16.0", :build]
+            depends_on "whisper-cpp"
+
+            def install
+              system "chmod", "+x", "scripts/build-app.sh"
+              system "zsh", "scripts/build-app.sh"
+              prefix.install "Build/Record.app"
+            end
+
+            def caveats
+              <<~EOS
+                Record has been installed to:
+                  #{prefix}/Record.app
+
+                To use Record:
+                  1. Copy to Applications: cp -r #{prefix}/Record.app /Applications/
+                  2. Launch: open /Applications/Record.app
+                  3. Grant Microphone and Screen Recording permissions when prompted.
+                  4. Open Preferences → Transcription to download a whisper model
+                     (large-v3-turbo recommended for best quality).
+
+                Optional: install the Kiro CLI (https://kiro.dev) to enable the
+                chat, auto-summary, and auto-title features. Recording and
+                transcription work without it.
+
+                All meeting data stays on your Mac, encrypted with AES-GCM at:
+                  ~/Library/Application Support/Record/
+              EOS
+            end
+
+            test do
+              assert_predicate prefix/"Record.app", :exist?
+              assert_predicate prefix/"Record.app/Contents/MacOS/Record", :executable?
+            end
+          end
+          EOF
+
+      - name: Commit and push to tap
+        working-directory: homebrew-tools
+        run: |
+          git config user.name "record-release-bot"
+          git config user.email "actions@github.com"
+          if git diff --quiet Formula/record.rb; then
+            echo "Formula already up to date."
+            exit 0
+          fi
+          git add Formula/record.rb
+          git commit -m "record: bump to ${{ steps.version.outputs.value }}
+
+          Automated by charsree/record release workflow."
+          git push
