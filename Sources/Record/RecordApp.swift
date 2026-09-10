@@ -871,6 +871,11 @@ private struct LiveControls: View {
                     .fixedSize()
                     .disabled(session.isRecording)
                     .help("Pick how you're meeting — this sets which audio sources are captured")
+
+                    if session.meetingScenario.needsAppSelection {
+                        appAudioPicker
+                    }
+
                     Text(session.meetingScenario.explanation)
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -963,6 +968,48 @@ private struct LiveControls: View {
         }
     }
 
+    /// App picker for the "One app's audio" scenario — Record captures
+    /// only this app's audio via ScreenCaptureKit's per-app filter. The
+    /// built-in equivalent of routing an app through a virtual device.
+    private var appAudioPicker: some View {
+        Menu {
+            ForEach(session.capturableApps) { app in
+                Button {
+                    session.selectedCaptureAppID = app.id
+                } label: {
+                    if session.selectedCaptureAppID == app.id {
+                        Label(app.name, systemImage: "checkmark")
+                    } else {
+                        Text(app.name)
+                    }
+                }
+            }
+            if session.capturableApps.isEmpty {
+                Text("No capturable apps found")
+            }
+            Divider()
+            Button("Refresh app list") {
+                session.refreshCapturableApps()
+            }
+        } label: {
+            Label(selectedAppName, systemImage: "app.badge.checkmark")
+                .lineLimit(1)
+        }
+        .menuStyle(.borderlessButton)
+        .fixedSize()
+        .disabled(session.isRecording)
+        .onAppear { session.refreshCapturableApps() }
+        .help("Which app's audio to capture")
+    }
+
+    private var selectedAppName: String {
+        guard let id = session.selectedCaptureAppID,
+              let app = session.capturableApps.first(where: { $0.id == id }) else {
+            return "Choose app…"
+        }
+        return app.name
+    }
+
     /// Menu for choosing which input device feeds the "You" track —
     /// built-in mic, USB interface, or a virtual loopback device like
     /// BlackHole 2ch (existential.audio/blackhole) for piping another
@@ -990,9 +1037,6 @@ private struct LiveControls: View {
                     }
                 }
             }
-            Divider()
-            Link("Get BlackHole (route app audio here)…",
-                 destination: URL(string: "https://existential.audio/blackhole/")!)
         } label: {
             Label(currentMicName, systemImage: "mic.badge.plus")
                 .lineLimit(1)

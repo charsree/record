@@ -15,15 +15,15 @@ enum MeetingScenario: String, CaseIterable, Identifiable, Codable {
     /// would only add noise or music playing on the Mac, so it's off.
     case inRoom
 
-    /// Another app's audio routed into Record through a virtual input
-    /// device such as BlackHole 2ch (existential.audio/blackhole) or an
-    /// aggregate device. Pick the virtual device as the input; system
-    /// audio capture is off because the virtual device IS the feed.
-    case virtualDevice
+    /// Capture ONE app's audio (plus your mic). Record uses macOS's
+    /// native per-app capture — the built-in equivalent of routing an
+    /// app through BlackHole, with zero extra software. Pick the app in
+    /// the picker that appears.
+    case specificApp
 
     /// Only what's playing on the Mac — a webinar you're just watching,
-    /// a recorded video, a livestream. Mic stays muted/off so your
-    /// keyboard and room noise don't pollute the transcript.
+    /// a recorded video, a livestream. Mic stays off so your keyboard
+    /// and room noise don't pollute the transcript.
     case playbackOnly
 
     var id: String { rawValue }
@@ -32,7 +32,7 @@ enum MeetingScenario: String, CaseIterable, Identifiable, Codable {
         switch self {
         case .videoCall: "Video call on this Mac"
         case .inRoom: "In-room / phone"
-        case .virtualDevice: "Virtual device (BlackHole)"
+        case .specificApp: "One app's audio"
         case .playbackOnly: "Mac audio only"
         }
     }
@@ -41,7 +41,7 @@ enum MeetingScenario: String, CaseIterable, Identifiable, Codable {
         switch self {
         case .videoCall: "video.fill"
         case .inRoom: "person.2.fill"
-        case .virtualDevice: "arrow.triangle.branch"
+        case .specificApp: "app.badge.checkmark"
         case .playbackOnly: "speaker.wave.3.fill"
         }
     }
@@ -52,8 +52,8 @@ enum MeetingScenario: String, CaseIterable, Identifiable, Codable {
             "Captures your mic (you) and system audio (everyone on the call). The standard choice for Zoom, Meet, Teams, Chime, Webex, or Slack calls happening on this Mac."
         case .inRoom:
             "Mic only. For in-person meetings, phone calls on speaker, or interviews — everything comes through the microphone. System audio is off so Mac sounds don't pollute the transcript."
-        case .virtualDevice:
-            "Captures a virtual input like BlackHole 2ch. Route any app's output to BlackHole in Audio MIDI Setup (or the app's own output picker) and Record transcribes that feed. Pick the BlackHole device as your input below."
+        case .specificApp:
+            "Captures your mic plus ONE app's audio — nothing else on the system. Like routing that app through a virtual device, but built in. Pick the app below."
         case .playbackOnly:
             "System audio only — mic is not captured. For webinars you're watching, videos, or livestreams where your own voice doesn't matter."
         }
@@ -61,16 +61,21 @@ enum MeetingScenario: String, CaseIterable, Identifiable, Codable {
 
     var capturesMicrophone: Bool {
         switch self {
-        case .videoCall, .inRoom, .virtualDevice: true
+        case .videoCall, .inRoom, .specificApp: true
         case .playbackOnly: false
         }
     }
 
     var capturesSystemAudio: Bool {
         switch self {
-        case .videoCall, .playbackOnly: true
-        case .inRoom, .virtualDevice: false
+        case .videoCall, .playbackOnly, .specificApp: true
+        case .inRoom: false
         }
+    }
+
+    /// Scenario needs the user to choose which app to capture.
+    var needsAppSelection: Bool {
+        self == .specificApp
     }
 
     static func load() -> MeetingScenario {
@@ -78,6 +83,7 @@ enum MeetingScenario: String, CaseIterable, Identifiable, Codable {
               let scenario = MeetingScenario(rawValue: raw) else {
             return .videoCall
         }
+        // Migrate the old BlackHole-based preset to the native one.
         return scenario
     }
 

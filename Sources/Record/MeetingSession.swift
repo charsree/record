@@ -83,6 +83,20 @@ final class MeetingSession: ObservableObject {
         didSet { meetingScenario.save() }
     }
 
+    /// Apps available for the "One app's audio" scenario.
+    @Published private(set) var capturableApps: [SystemCaptureService.CapturableApp] = []
+    /// Bundle ID of the app to capture in the specificApp scenario.
+    @Published var selectedCaptureAppID: String? = UserDefaults.standard.string(forKey: "record.captureAppID") {
+        didSet { UserDefaults.standard.set(selectedCaptureAppID, forKey: "record.captureAppID") }
+    }
+
+    func refreshCapturableApps() {
+        Task {
+            let apps = await SystemCaptureService.capturableApps()
+            await MainActor.run { self.capturableApps = apps }
+        }
+    }
+
     /// Re-scan for `kiro-cli`. Call after the user edits the
     /// "Kiro executable override" field in Preferences → Kiro.
     func refreshKiroAvailability() {
@@ -524,7 +538,8 @@ final class MeetingSession: ObservableObject {
                 try await systemCapture.start(
                     includeVisualFrames: visualContextEnabled,
                     displayID: selectedCaptureTarget.displayID,
-                    windowID: selectedCaptureTarget.windowID
+                    windowID: selectedCaptureTarget.windowID,
+                    appBundleID: meetingScenario.needsAppSelection ? selectedCaptureAppID : nil
                 )
             }
             activeSegmentStart = .now
@@ -571,7 +586,8 @@ final class MeetingSession: ObservableObject {
             try await systemCapture.start(
                 includeVisualFrames: visualContextEnabled,
                 displayID: target.displayID,
-                windowID: target.windowID
+                windowID: target.windowID,
+                appBundleID: meetingScenario.needsAppSelection ? selectedCaptureAppID : nil
             )
         } catch {
             errorMessage = error.localizedDescription
@@ -696,7 +712,8 @@ final class MeetingSession: ObservableObject {
             try await systemCapture.start(
                 includeVisualFrames: enableVisuals,
                 displayID: selectedCaptureTarget.displayID,
-                windowID: selectedCaptureTarget.windowID
+                windowID: selectedCaptureTarget.windowID,
+                appBundleID: meetingScenario.needsAppSelection ? selectedCaptureAppID : nil
             )
             visualContextEnabled = enableVisuals
             systemAudioAvailable = true
@@ -707,7 +724,8 @@ final class MeetingSession: ObservableObject {
             try? await systemCapture.start(
                 includeVisualFrames: false,
                 displayID: selectedCaptureTarget.displayID,
-                windowID: selectedCaptureTarget.windowID
+                windowID: selectedCaptureTarget.windowID,
+                appBundleID: meetingScenario.needsAppSelection ? selectedCaptureAppID : nil
             )
         }
     }
@@ -1142,7 +1160,8 @@ final class MeetingSession: ObservableObject {
                 try await systemCapture.start(
                     includeVisualFrames: visualContextEnabled,
                     displayID: selectedCaptureTarget.displayID,
-                    windowID: selectedCaptureTarget.windowID
+                    windowID: selectedCaptureTarget.windowID,
+                    appBundleID: meetingScenario.needsAppSelection ? selectedCaptureAppID : nil
                 )
             }
             captureModeText = {

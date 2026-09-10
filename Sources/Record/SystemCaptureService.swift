@@ -31,10 +31,41 @@ final class SystemCaptureService: NSObject {
 
     var isRunning: Bool { stream != nil }
 
+    /// A running app that can be audio-captured. Used by the "Specific
+    /// app" capture scenario — Record grabs ONLY that app's audio, the
+    /// built-in equivalent of routing through BlackHole.
+    struct CapturableApp: Identifiable, Hashable, Sendable {
+        let id: String      // bundle ID
+        let name: String
+    }
+
+    /// Running apps with visible windows (the ones that can be captured).
+    /// Sorted by name, Record itself excluded.
+    static func capturableApps() async -> [CapturableApp] {
+        guard let content = try? await SCShareableContent.excludingDesktopWindows(
+            false, onScreenWindowsOnly: true
+        ) else { return [] }
+        let selfBundleID = Bundle.main.bundleIdentifier ?? "dev.charsree.record"
+        var seen = Set<String>()
+        var apps: [CapturableApp] = []
+        for application in content.applications {
+            let bundleID = application.bundleIdentifier
+            guard !bundleID.isEmpty,
+                  bundleID != selfBundleID,
+                  !seen.contains(bundleID) else { continue }
+            let name = application.applicationName
+            guard !name.isEmpty else { continue }
+            seen.insert(bundleID)
+            apps.append(CapturableApp(id: bundleID, name: name))
+        }
+        return apps.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+    }
+
     func start(
         includeVisualFrames: Bool,
         displayID: CGDirectDisplayID? = nil,
-        windowID: CGWindowID? = nil
+        windowID: CGWindowID? = nil,
+        appBundleID: String? = nil
     ) async throws {
         acceptsVisualFrames.set(includeVisualFrames)
         let content = try await SCShareableContent.excludingDesktopWindows(
@@ -43,9 +74,23 @@ final class SystemCaptureService: NSObject {
         )
         let filter: SCContentFilter
         // Never capture Record's own windows (avoids OCR'ing our own UI).
-        let selfBundleID = Bundle.main.bundleIdentifier ?? "local.record.app"
+        let selfBundleID = Bundle.main.bundleIdentifier ?? "dev.charsree.record"
         let selfApps = content.applications.filter { $0.bundleIdentifier == selfBundleID }
-        if let windowID,
+        if let appBundleID,
+           let app = content.applications.first(where: { $0.bundleIdentifier == appBundleID }) {
+            // Per-app capture: only this app's audio (and windows, if
+            // visual frames are on) are captured — everything else on the
+            // system stays out of the transcript. This is the native
+            // replacement for routing an app through BlackHole.
+            guard let display = content.displays.first(where: { displayID == nil || $0.displayID == displayID }) else {
+                throw CaptureError.noDisplay
+            }
+            filter = SCContentFilter(
+                display: display,
+                including: [app],
+                exceptingWindows: []
+            )
+        } else if let windowID,
            let window = content.windows.first(where: { $0.windowID == windowID }) {
             filter = SCContentFilter(desktopIndependentWindow: window)
         } else {
