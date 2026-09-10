@@ -1,26 +1,20 @@
-name: Update Homebrew formula on release
+name: Update Homebrew cask on release
 
-# Fires whenever a `v*` tag is pushed AND the corresponding GitHub
-# Release with a Record-<version>.zip asset exists (created by
-# scripts/tag-release.sh). Rewrites Formula/record.rb in
-# charsree/homebrew-tools with the new url + sha256.
+# Fires whenever a GitHub Release is published with a Record-<version>.zip
+# asset (created by scripts/tag-release.sh). Rewrites Casks/record.rb in
+# charsree/homebrew-tools with the new url + sha256 so users pick it up
+# with `brew upgrade --cask record`.
 #
-# ONE-TIME SETUP (once):
-#   1. Create a fine-grained Personal Access Token:
-#      https://github.com/settings/personal-access-tokens/new
-#      • Resource owner: charsree
-#      • Repository access → Only select repositories → charsree/homebrew-tools
-#      • Repository permissions → Contents: Read and write
-#   2. Add it as a repo secret on charsree/record:
-#      • Name:  TAP_TOKEN
-#      • Value: the PAT
+# ONE-TIME SETUP: create a fine-grained Personal Access Token with
+# Contents: Read and write on charsree/homebrew-tools, and store it as
+# the TAP_TOKEN secret on this repo.
 
 on:
   release:
     types: [published]
 
 jobs:
-  update-formula:
+  update-cask:
     runs-on: ubuntu-latest
     steps:
       - name: Extract version from tag
@@ -41,9 +35,8 @@ jobs:
           echo "Fetching $asset"
           curl -sfL "$asset" -o Record.zip
           sha=$(sha256sum Record.zip | awk '{print $1}')
-          size=$(du -h Record.zip | awk '{print $1}')
           echo "value=$sha" >> "$GITHUB_OUTPUT"
-          echo "SHA256: $sha (size: $size)"
+          echo "SHA256: $sha ($(du -h Record.zip | awk '{print $1}'))"
 
       - name: Checkout homebrew-tools
         uses: actions/checkout@v4
@@ -52,84 +45,68 @@ jobs:
           token: ${{ secrets.TAP_TOKEN }}
           path: homebrew-tools
 
-      - name: Rewrite Formula/record.rb
+      - name: Rewrite Casks/record.rb
         env:
           VERSION: ${{ steps.version.outputs.value }}
           SHA256: ${{ steps.sha.outputs.value }}
-          REPO: ${{ github.repository }}
-          REF: ${{ github.ref_name }}
         run: |
-          cat > homebrew-tools/Formula/record.rb <<EOF
-          class Record < Formula
-            desc "Local-first macOS meeting assistant with mic, system audio, screen OCR, and Kiro chat"
-            homepage "https://github.com/${REPO}"
-            url "https://github.com/${REPO}/releases/download/${REF}/Record-${VERSION}.zip"
-            sha256 "${SHA256}"
+          mkdir -p homebrew-tools/Casks
+          # Also delete any legacy Formula version that used to live here.
+          rm -f homebrew-tools/Formula/record.rb
+          cat > homebrew-tools/Casks/record.rb <<EOF
+          cask "record" do
             version "${VERSION}"
-            license "MIT"
+            sha256 "${SHA256}"
 
-            depends_on :macos
+            url "https://github.com/charsree/record/releases/download/v#{version}/Record-#{version}.zip"
+            name "Record"
+            desc "Local-first macOS meeting assistant with mic, system audio, screen OCR, and Kiro chat"
+            homepage "https://github.com/charsree/record"
 
-            def install
-              # Pre-built .app bundle sits at the archive root because
-              # tag-release.sh zipped it with `ditto --keepParent`.
-              prefix.install "Record.app"
+            livecheck do
+              url :url
+              strategy :github_latest
+            end
 
-              # Auto-install into /Applications so Launchpad / Spotlight
-              # / TCC treat it like any drag-installed app. Falls back to
-              # a caveats note when /Applications isn't writable.
-              applications = "/Applications"
-              if File.writable?(applications)
-                rm_rf "#{applications}/Record.app"
-                cp_r "#{prefix}/Record.app", "#{applications}/Record.app"
-              end
+            auto_updates false
 
-              # \`record\` in Terminal opens the app.
-              (bin/"record").write <<~SH
+            app "Record.app"
+
+            # Convenience CLI: \`record\` in Terminal launches the installed app.
+            binary "#{staged_path}/record-shim", target: "record"
+
+            preflight do
+              File.write("#{staged_path}/record-shim", <<~SH)
                 #!/bin/sh
                 exec open -a "Record" "\\\$@"
               SH
-              chmod 0755, bin/"record"
+              File.chmod(0755, "#{staged_path}/record-shim")
             end
 
-            def caveats
-              if File.exist?("/Applications/Record.app")
-                <<~EOS
-                  Record was installed to /Applications/Record.app.
+            zap trash: [
+              "~/Library/Application Support/Record",
+              "~/Library/Preferences/dev.charsree.record.plist",
+              "~/Library/Saved Application State/dev.charsree.record.savedState",
+            ]
 
-                  Launch it:
-                    open -a Record        # or just: record
+            caveats <<~EOS
+              Record was installed to /Applications/Record.app.
 
-                  First launch asks for Microphone + Screen Recording. Grant both —
-                  system audio (Zoom/Meet/Teams/etc.) needs Screen Recording.
+              Launch it:
+                open -a Record        # or just: record
 
-                  Pick a whisper model in Preferences → Transcription.
-                  large-v3-turbo is best; base.en is smallest / fastest.
+              First launch asks for Microphone + Screen Recording. Grant both —
+              system audio (Zoom/Meet/Teams/etc.) needs Screen Recording.
 
-                  Optional: install the Kiro CLI (https://kiro.dev) for chat,
-                  auto-title, and auto-summary. Recording + transcription work
-                  without it.
+              Pick a whisper model in Preferences → Transcription.
+              large-v3-turbo is best; base.en is smallest / fastest.
 
-                  Data stays local, AES-GCM encrypted at
-                  ~/Library/Application Support/Record/.
-                EOS
-              else
-                <<~EOS
-                  Record has been installed to:
-                    #{prefix}/Record.app
+              Optional: install the Kiro CLI (https://kiro.dev) for chat, auto-title,
+              and auto-summary. Recording + transcription work without it.
 
-                  We couldn't auto-copy it to /Applications (permission denied).
-                  Move it manually:
-                    cp -R #{prefix}/Record.app /Applications/
-                    open -a Record
-                EOS
-              end
-            end
-
-            test do
-              assert_predicate prefix/"Record.app", :exist?
-              assert_predicate prefix/"Record.app/Contents/MacOS/Record", :executable?
-            end
+              All meeting data stays on your Mac, encrypted with AES-GCM at:
+                ~/Library/Application Support/Record/
+            EOS
           end
           EOF
 
@@ -138,11 +115,11 @@ jobs:
         run: |
           git config user.name "record-release-bot"
           git config user.email "actions@github.com"
-          if git diff --quiet Formula/record.rb; then
-            echo "Formula already up to date."
+          git add -A Casks/record.rb Formula/record.rb 2>/dev/null || true
+          if git diff --cached --quiet; then
+            echo "Cask already up to date."
             exit 0
           fi
-          git add Formula/record.rb
           git commit -m "record: bump to ${{ steps.version.outputs.value }}
 
           Automated by the charsree/record release workflow."
